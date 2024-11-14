@@ -1,29 +1,29 @@
-from gpiozero import Motor,PWMOutputDevice,DigitalInputDevice
-from time import sleep,time
-import threading
+import uasyncio as asyncio
+from machine import Pin, PWM
+import time
 
 """
 ---------Notes for code module---------
 Inputs needed for code functionality:
  - new_direction from pathfinding code
  - motor_pwm for speed of movement
- 
-Remember to set the input pins(marked with <-----------)
 
+Remember to set the input pins (marked with <-----------)
 Tune PID when testing
 """
 
+# Global Variables
 current_direction = ""
 new_direction = ""
-motor_pwm = 0
+motor_pwm = 5000  # Example PWM speed, can be adjusted
 running = True
 
 # PID class definition
 class PID:
     def __init__(self, Kp, Ki, Kd, setpoint):
-        self.Kp = Kp # Proportional
-        self.Ki = Ki # Integral
-        self.Kd = Kd # Derivative
+        self.Kp = Kp  # Proportional
+        self.Ki = Ki  # Integral
+        self.Kd = Kd  # Derivative
         self.setpoint = setpoint
         
         self.prev_err = 0
@@ -31,144 +31,140 @@ class PID:
     
     def calculate(self, measured_value, dt):
         err = self.setpoint - measured_value
-        
-        # Proportional gain
         P = self.Kp * err
-        
-        # Integral gain
         self.integral += err * dt
         I = self.Ki * self.integral
-        
-        # Derivative gain (d/dt of error)
-        derivative = (err-self.prev_err)/dt
+        derivative = (err - self.prev_err) / dt
         D = self.Kd * derivative
-        
         self.prev_err = err
-        
-        return (P+I+D)
-    
-#---------------Main Motor code--------------------
+        return P + I + D
 
-# Motor Control Setup
-motor_pwm_left = # PWM Pin for left motor <-----------
-motor_pwm_right = # PWM Pin for right motor <-----------
-motor_left = Motor(motor_pwm_left)
-motor_right = Motor(motor_pwm_right)
+# Motor Control Setup (Example GPIO pins)
+motor_left_pwm = PWM(Pin(0,Pin.OUT), freq=5000, duty_u16=8192) # PWM Pin for left motor
+motor_right_pwm = PWM(Pin(5,Pin.OUT), freq=5000, duty_u16=8192) # PWM Pin for right motor
+motor_left_forward = Pin(1,Pin.OUT)
+motor_left_backward = Pin(2,Pin.OUT)
+motor_right_forward = Pin(3,Pin.OUT)
+motor_right_backward = Pin(4,Pin.OUT)
 
-# Encoder Setup
-encoder_left_pin = # encoder left pin placeholder <-----------
-encoder_right_pin = # encoder right pin placeholder <-----------
-encoder_left = DigitalInputDevice(encoder_left_pin)
-encoder_right = DigitalInputDevice(encoder_right_pin)
+# Encoder Variables (Dummy initial values, replace with actual implementation)
 left_count = 0
 right_count = 0
 
-# Encoder callbacks
-lock = threading.Lock() # Thread lock for thread safety
+# Initialize PID controllers for each motor
+motor_pid_left = PID(1.0, 0.1, 0.01, 0)
+motor_pid_right = PID(1.0, 0.1, 0.01, 0)
 
-def left_encoder_callback():
-    global left_count
-    with lock:
-        left_count += 1
-
-def right_encoder_callback():
-    global right_count
-    with lock:
-        right_count += 1
-
-# Attach callbacks to encoder revolution event
-encoder_left.when_activated = left_encoder_callback
-encoder_right.when_activated = right_encoder_callback
-
-# Initialising PID object for each motor
-motor_pid_left = PID(1.0,0.1,0.01,0)
-motor_pid_right = PID(1.0,0.1,0.01,0)
-
-# Motor drive & odometry function
-def pid_drive(target_left_speed, target_right_speed):
+async def pid_drive(target_left_speed, target_right_speed):
     global left_count, right_count, current_direction
-    
-    # Sets PID setpoint
-    if current_direction in ["forward", "backward"]:
-        motor_pid_left.setpoint = target_left_speed
-        motor_pid_right.setpoint = target_right_speed
-    elif current_direction == ("left"):
-        motor_pid_left.setpoint = -100# Measure how many counts it takes for a 90 degree turn <-----------
-        motor_pid_right.setpoint = 100# Measure how many counts it takes for a 90 degree turn <-----------
-    elif current_direction == ("right"):
-        motor_pid_left.setpoint = 100# Measure how many counts it takes for a 90 degree turn <-----------
-        motor_pid_right.setpoint = -100# Measure how many counts it takes for a 90 degree turn <-----------
-    
-    last_time = time()
-    
+
+    motor_pid_left.setpoint = target_left_speed
+    motor_pid_right.setpoint = target_right_speed
+
+    last_time = time.time()
+
     while running:
-        # Calculates time elapsed
-        current_time = time()
+        current_time = time.time()
         dt = current_time - last_time
         last_time = current_time
         
-        # Speed odometry using encoder counts
+        # Ensure dt is not zero
+        if dt == 0:
+            dt = 0.001  # minimum value to prevent division by zero error
+        
         current_left_speed = left_count
         current_right_speed = right_count
-        
-        # PID control outputs
-        pwm_left = motor_pid_left.calculate(current_left_speed,dt)
-        pwm_right = motor_pid_right.calculate(current_right_speed,dt)
-        
-        # Set motor speeds using PWM
-        motor_left.value = max(-1, min(1, pwm_left))
-        motor_right.value = max(-1, min(1, pwm_right))
-        
-         # Break condition for 90-degree turns
+        left_count = 0
+        right_count = 0
+
+        pwm_left = motor_pid_left.calculate(current_left_speed, dt)
+        pwm_right = motor_pid_right.calculate(current_right_speed, dt)
+
+        # PWM values clamped between 0 and 65535 for duty cycle
+        pwm_left = max(0, min(65535, int(pwm_left)))
+        pwm_right = max(0, min(65535, int(pwm_right)))
+
+        motor_left_pwm.duty_u16(pwm_left)
+        motor_right_pwm.duty_u16(pwm_right)
+        if pwm_left >= 0:
+            motor_left_forward.value(1)
+            motor_left_backward.value(0)
+        elif pwm_left < 0:
+            motor_left_forward.value(0)
+            motor_left_backward.value(1)
+        if pwm_right >= 0:
+            motor_right_forward.value(1)
+            motor_right_backward.value(0)
+        elif pwm_right < 0:
+            motor_right_forward.value(0)
+            motor_right_backward.value(1)
+            
+        print(f"current pwm - left: {pwm_left}, right: {pwm_right}\n Motor status: fwd: {motor_left_forward.value()}, bwd: {motor_left_backward.value()}")
+
+        # Stop the motors after completing a turn
         if current_direction in ["left", "right"]:
             if abs(left_count) >= abs(motor_pid_left.setpoint) and abs(right_count) >= abs(motor_pid_right.setpoint):
-                motor_left.value = 0
-                motor_right.value = 0
-                left_count = 0
-                right_count = 0
+                motor_left.duty_u16(0)
+                motor_right.duty_u16(0)
                 break
-        
-        if current_direction in ["forward", "backward"]:
-            left_count = 0
-            right_count = 0
-        
-        sleep(0.05)
 
-# Listen function to detect change in pathfinding input
-def direction_listen():
-    global current_direction
-    global new_direction
+        await asyncio.sleep(0.05)  # Yield control to other tasks
+
+async def direction_listen():
+    global current_direction, new_direction
     while running:
+        print("Direction listen event")
         if current_direction != new_direction:
-            if new_direction in  ["forward","backward","left","right"]:
+            if new_direction in ["forward", "backward", "left", "right"]:
                 current_direction = new_direction
+                print(f"Direction updated to: {current_direction}")
             elif new_direction == "stop":
-                motor_left.value = 0
-                motor_right.value = 0
+                current_direction = "stop"
+                motor_left.duty_u16(0)
+                motor_right.duty_u16(0)
+                print("Motors stopped")
             else:
                 print("Invalid direction input detected")
-        sleep(0.05)
+        await asyncio.sleep(0.05)  # Yield control to other tasks
         
-# Movement control function
-def update_drive(pwm):
+async def manual_input():
+    global new_direction
+    user_input = input("Enter new direction (forward, backward, left, right, stop): ")
+    if user_input in ["forward", "backward", "left", "right", "stop"]:
+        new_direction = user_input
+    else:
+        print("Invalid direction. Try again.")
+    await asyncio.sleep(0.1)  # Yield control to keep the program responsive
+
+async def update_drive(pwm):
     global current_direction
     while running:
         if current_direction == "forward":
-            pid_drive(pwm, pwm)  # Move forward
+            await pid_drive(pwm, pwm)
         elif current_direction == "backward":
-            pid_drive(-pwm, -pwm) # Move backward 
+            await pid_drive(-pwm, -pwm)
         elif current_direction == "left":
-            pid_drive(-pwm, pwm) # Turn left
+            await pid_drive(-pwm, pwm)
         elif current_direction == "right":
-            pid_drive(pwm, -pwm)  # Turn right
-        sleep(0.05) # Slight delay to reduce cpu load
+            await pid_drive(pwm, -pwm)
+        elif current_direction == "stop":
+            motor_left.duty_u16(0)
+            motor_right.duty_u16(0)
+        await asyncio.sleep(0.1)  # Slight delay to reduce CPU load
 
-# Starts new thread for direction listening function
-direction_thread = threading.Thread(target=direction_listen)
-direction_thread.start()
+# Main function to start all tasks
+async def main():
+    print("Boot successful")
+    drive_task = asyncio.create_task(update_drive(motor_pwm))
+    listen_task = asyncio.create_task(direction_listen())
+    input_task = asyncio.create_task(manual_input())
+    await asyncio.gather(drive_task, listen_task)
 
-# Start drive update loop
+# Run the main function using asyncio event loop
 try:
-    update_drive(motor_pwm)
+    asyncio.run(main())
 except KeyboardInterrupt:
     running = False
+    motor_left.duty_u16(0)
+    motor_right.duty_u16(0)
+    print("Program terminated.")
