@@ -1,6 +1,6 @@
 import uasyncio as asyncio
 from machine import Pin, PWM
-import time
+import time, lsm303d
 
 """
 ---------Notes for code module---------
@@ -15,7 +15,7 @@ Tune PID when testing
 # Global Variables
 current_direction = ""
 new_direction = ""
-motor_pwm = 5000  # Example PWM speed, can be adjusted
+motor_pwm = 10000  # Example PWM speed, can be adjusted
 running = True
 
 # PID class definition
@@ -39,21 +39,24 @@ class PID:
         self.prev_err = err
         return P + I + D
 
-# Motor Control Setup (Example GPIO pins)
-motor_left_pwm = PWM(Pin(0,Pin.OUT), freq=5000, duty_u16=8192) # PWM Pin for left motor
-motor_right_pwm = PWM(Pin(5,Pin.OUT), freq=5000, duty_u16=8192) # PWM Pin for right motor
+# Motor Control Setup
+motor_left_pwm = PWM(Pin(0,Pin.OUT), freq=1000, duty_u16=0) # PWM Pin for left motor
+motor_right_pwm = PWM(Pin(5,Pin.OUT), freq=1000, duty_u16=0) # PWM Pin for right motor
 motor_left_forward = Pin(1,Pin.OUT)
 motor_left_backward = Pin(2,Pin.OUT)
 motor_right_forward = Pin(3,Pin.OUT)
 motor_right_backward = Pin(4,Pin.OUT)
 
-# Encoder Variables (Dummy initial values, replace with actual implementation)
+# Accelerometer setup
+lsm = LSM303D()
+
+# Encoder Variables
 left_count = 0
 right_count = 0
 
 # Initialize PID controllers for each motor
-motor_pid_left = PID(1.0, 0.1, 0.01, 0)
-motor_pid_right = PID(1.0, 0.1, 0.01, 0)
+motor_pid_left = PID(2.0, 0.1, 0.01, 0)
+motor_pid_right = PID(2.0, 0.1, 0.01, 0)
 
 async def pid_drive(target_left_speed, target_right_speed):
     global left_count, right_count, current_direction
@@ -81,11 +84,11 @@ async def pid_drive(target_left_speed, target_right_speed):
         pwm_right = motor_pid_right.calculate(current_right_speed, dt)
 
         # PWM values clamped between 0 and 65535 for duty cycle
-        pwm_left = max(0, min(65535, int(pwm_left)))
-        pwm_right = max(0, min(65535, int(pwm_right)))
+        pwm_left = max(-65535, min(65535, int(pwm_left)))
+        pwm_right = max(-65535, min(65535, int(pwm_right)))
 
-        motor_left_pwm.duty_u16(pwm_left)
-        motor_right_pwm.duty_u16(pwm_right)
+        motor_left_pwm.duty_u16(abs(pwm_left))
+        motor_right_pwm.duty_u16(abs(pwm_right))
         if pwm_left >= 0:
             motor_left_forward.value(1)
             motor_left_backward.value(0)
@@ -99,13 +102,13 @@ async def pid_drive(target_left_speed, target_right_speed):
             motor_right_forward.value(0)
             motor_right_backward.value(1)
             
-        print(f"current pwm - left: {pwm_left}, right: {pwm_right}\n Motor status: fwd: {motor_left_forward.value()}, bwd: {motor_left_backward.value()}")
+        print(f"current pwm - left: {pwm_left}, right: {pwm_right}\nLeft Motor status: fwd: {motor_left_forward.value()}, bwd: {motor_left_backward.value()}\nRight Motor status: fwd: {motor_right_forward.value()}, bwd: {motor_right_backward.value()}")
 
         # Stop the motors after completing a turn
         if current_direction in ["left", "right"]:
             if abs(left_count) >= abs(motor_pid_left.setpoint) and abs(right_count) >= abs(motor_pid_right.setpoint):
-                motor_left.duty_u16(0)
-                motor_right.duty_u16(0)
+                motor_left_pwm.duty_u16(0)
+                motor_right_pwm.duty_u16(0)
                 break
 
         await asyncio.sleep(0.05)  # Yield control to other tasks
@@ -120,8 +123,8 @@ async def direction_listen():
                 print(f"Direction updated to: {current_direction}")
             elif new_direction == "stop":
                 current_direction = "stop"
-                motor_left.duty_u16(0)
-                motor_right.duty_u16(0)
+                motor_left_pwm.duty_u16(0)
+                motor_right_pwm.duty_u16(0)
                 print("Motors stopped")
             else:
                 print("Invalid direction input detected")
@@ -147,10 +150,10 @@ async def update_drive(pwm):
             await pid_drive(-pwm, pwm)
         elif current_direction == "right":
             await pid_drive(pwm, -pwm)
-        elif current_direction == "stop":
-            motor_left.duty_u16(0)
-            motor_right.duty_u16(0)
         await asyncio.sleep(0.1)  # Slight delay to reduce CPU load
+
+def updateAccel():
+    print(lsm.accelerometer(), lsm.magnetometer())
 
 # Main function to start all tasks
 async def main():
@@ -158,13 +161,15 @@ async def main():
     drive_task = asyncio.create_task(update_drive(motor_pwm))
     listen_task = asyncio.create_task(direction_listen())
     input_task = asyncio.create_task(manual_input())
-    await asyncio.gather(drive_task, listen_task)
+    accel_task = asyncio.create_task(updateAccel())
+    if running:
+        await asyncio.gather(drive_task, listen_task,accel_task)
 
 # Run the main function using asyncio event loop
 try:
     asyncio.run(main())
 except KeyboardInterrupt:
     running = False
-    motor_left.duty_u16(0)
-    motor_right.duty_u16(0)
+    motor_left_pwm.duty_u16(0)
+    motor_right_pwm.duty_u16(0)
     print("Program terminated.")
