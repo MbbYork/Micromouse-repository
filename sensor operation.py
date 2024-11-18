@@ -17,7 +17,7 @@ def ultra():
    if distance >= 50:
        print("The distance from object is ",distance,"cm")
    else:
-       print("Stop robot")
+       print("Stop robot",distance)
        
 while True:
    ultra()
