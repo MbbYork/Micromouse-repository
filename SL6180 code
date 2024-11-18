@@ -1,111 +1,105 @@
 import machine
 import time
 
-VL6180_ADDR = 0x29  # Default I2C address for VL6180
+# VL6180 sensor default I2C address and register addresses
+VL6180_ADDR = 0x29
 
+# Register definitions
 SYSRANGE_START = 0x18
 RESULT_RANGE_VAL = 0x62
 SYSRANGE_MEASUREMENT_STATUS = 0x19
-PART_ID_REGISTER = 0x010F  # Part ID register for testing
+PART_ID_REGISTER = 0x010F
 
-# I2C setup (adjust pins based on your microcontroller)
-i2c = machine.I2C(0, scl=machine.Pin(5), sda=machine.Pin(4), freq=1000)  # Set your I2C pins here and lower frequency
+# I2C Setup (adjust pins based on your microcontroller)
+i2c = machine.I2C(0, scl=machine.Pin(1), sda=machine.Pin(0), freq=100000)
 
-# Write a byte to a register
+# Function to write a byte to a register
 def write_reg(reg, value):
     """Write a byte to a register."""
     try:
         i2c.writeto_mem(VL6180_ADDR, reg, bytearray([value]))
-        print(f"Wrote value {hex(value)} to register {hex(reg)}")
+        print(f"Write success: {hex(value)} to {hex(reg)}")
     except Exception as e:
-        print(f"Error writing to register {hex(reg)}: {e}")
+        print(f"Error writing to {hex(reg)}: {e}")
 
-# Read a byte from a register
+# Function to read a byte from a register
 def read_reg(reg):
     """Read a byte from a register."""
     try:
         return i2c.readfrom_mem(VL6180_ADDR, reg, 1)[0]
     except Exception as e:
-        print(f"Error reading from register {hex(reg)}: {e}")
+        print(f"Error reading from {hex(reg)}: {e}")
         return None
 
-# Read the Part ID to confirm sensor is responsive
+# Function to read the Part ID to confirm sensor is responsive
 def read_part_id():
-    """Read the Part ID register (0x010F)."""
+    """Read the Part ID register to check if sensor is connected properly."""
     part_id = read_reg(PART_ID_REGISTER)
     if part_id is not None:
         print(f"VL6180 Part ID: {hex(part_id)}")
     else:
         print("Failed to read Part ID")
 
-# Initialize the sensor
+# Function to initialize the sensor
 def initialize_sensor():
     """Initialize the VL6180 sensor."""
     print("Initializing sensor...")
     
-    try:
-        # Power on the system
-        write_reg(0x01, 0x01)
-        time.sleep(0.1)  # Allow time for initialization
-        print("Sensor initialized")
-        
-        # Check if the sensor is ready by reading its part ID
-        read_part_id()
-    except Exception as e:
-        print(f"Error during sensor initialization: {e}")
+    # Power on the sensor
+    write_reg(0x01, 0x01)
+    time.sleep(0.1)  # Allow time for the sensor to initialize
+    
+    # Verify sensor is initialized by reading Part ID
+    read_part_id()
+    
+    print("Sensor initialized successfully")
 
-# Start a range measurement
+# Function to start a range measurement
 def start_range_measurement():
     """Start a range measurement."""
-    try:
-        write_reg(SYSRANGE_START, 0x01)  # Trigger a single-shot range measurement
-        print("Range measurement started.")
-    except Exception as e:
-        print(f"Error starting range measurement: {e}")
+    write_reg(SYSRANGE_START, 0x01)  # Trigger a single-shot range measurement
+    print("Range measurement started.")
 
-# Read the range value
+# Function to wait for the measurement to complete
+def wait_for_measurement():
+    """Wait for the range measurement to complete by checking the status register."""
+    while True:
+        status = read_reg(SYSRANGE_MEASUREMENT_STATUS)
+        if status is not None and (status & 0x01):  # Check if measurement is complete
+            break
+        time.sleep(0.01)  # Polling delay for status check
+
+# Function to read the range value (distance in mm)
 def read_range():
-    """Read the range value (distance in mm)."""
-    try:
-        # Wait for the measurement to complete
-        while True:
-            status = read_reg(SYSRANGE_MEASUREMENT_STATUS)
-            if status is not None and status & 0x01:  # Measurement complete when bit 0 is set
-                break
-            time.sleep(0.01)  # Wait a bit before checking again
-
-        # Read the resulting distance (in mm)
-        distance = read_reg(RESULT_RANGE_VAL)
-        if distance is not None:
-            return distance
-        else:
-            print("Error: Failed to read distance")
-            return None
-    except Exception as e:
-        print(f"Error reading range: {e}")
+    """Read the range value (distance in mm) from the sensor."""
+    distance = read_reg(RESULT_RANGE_VAL)
+    if distance is not None:
+        return distance
+    else:
+        print("Error: Failed to read distance")
         return None
 
-# Main loop to initialize and read distance
+# Main function to initialize and continuously read distance from the VL6180 sensor
 def main():
+    """Main loop to initialize and continuously read distance from the VL6180 sensor."""
     print("Starting I2C communication...")
 
-    # First, test sensor communication by reading Part ID
-    read_part_id()  # Read the Part ID register
-
-    initialize_sensor()  # Initialize the sensor
+    # Initialize sensor
+    initialize_sensor()
 
     while True:
-        start_range_measurement()  # Trigger the range measurement
-        time.sleep(0.1)  # Wait for the measurement to complete
-
-        distance = read_range()  # Read the distance value
+        start_range_measurement()  # Start range measurement
+        wait_for_measurement()     # Wait for the measurement to complete
+        
+        # Read the distance value and print it
+        distance = read_range()
         if distance is not None:
             print(f"Distance: {distance} mm")
         else:
             print("Error: Unable to read distance")
 
-        time.sleep(0.5)  # Wait before the next measurement
+        time.sleep(0.5)  # Delay before the next measurement
 
-# Run the main loop
+# Run the main function
 main()
 
