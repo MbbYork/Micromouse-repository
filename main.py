@@ -10,7 +10,7 @@ from frontsensor import ultra
 import utime
 
 
-def main(){
+def main():
   while True
   
   #initialises sensors and motors 
@@ -26,4 +26,4 @@ ultra()
 
   #motor operation based on output of pathfinding algorithm 
   
-}
+
