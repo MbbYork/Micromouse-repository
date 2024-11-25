@@ -1,5 +1,7 @@
 from machine import Pin
 import utime
+import asyncio
+
 trigger = Pin(14, Pin.OUT)
 echo = Pin(15, Pin.IN)
 def ultra():
