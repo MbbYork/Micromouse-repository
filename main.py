@@ -10,6 +10,8 @@ def main(){
 
   #receives data from the sensors 
 ultra()
+  utime.sleep(2)
+  
 
   #processes data using the pathfinding algorithm 
 
