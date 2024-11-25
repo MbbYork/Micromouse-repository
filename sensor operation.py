@@ -2,6 +2,7 @@ from machine import Pin
 import utime
 import asyncio
 
+LED = Pin(1,Pin.OUT,Pin.PULL_UP)
 trigger = Pin(14, Pin.OUT)
 echo = Pin(15, Pin.IN)
 def ultra():
@@ -16,11 +17,17 @@ def ultra():
        signalon = utime.ticks_us()
    timepassed = signalon - signaloff
    distance = (timepassed * 0.0343) / 2
-   if distance >= 50:
+   if distance >= 5:
        print("The distance from object is ",distance,"cm")
+       LED.low()
    else:
        print("Stop robot",distance)
+       #stop_event = new Event()
+       #stop_event.is_set()
+       LED.high()
        
 while True:
+   ultra()
+   utime.sleep(2)
    ultra()
    utime.sleep(2)
