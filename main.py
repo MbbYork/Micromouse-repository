@@ -4,6 +4,7 @@ import VL6180v2
 from frontsensor import ultra
 
 def main(){
+  while True
   
   #initialises sensors and motors 
 
