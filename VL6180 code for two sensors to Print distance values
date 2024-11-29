@@ -19,6 +19,7 @@ sensor1 = Sensor(i2c_0)
 sensor2 = Sensor(i2c_1)
 
 # Main loop to read and print distance for both sensors
+def sensordata1:
 while True:
     # Read the distance from the first sensor
     distance1 = sensor1.range()
