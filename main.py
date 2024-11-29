@@ -15,9 +15,9 @@ def main():
 
   #receives data from the sensors
 sensordata1()
+sleep(2)
 sensordata2()
-
-  #processes data using the pathfinding algorithm 
+ #processes data using the pathfinding algorithm 
 
   #motor operation based on output of pathfinding algorithm 
   
