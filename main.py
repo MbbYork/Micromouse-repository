@@ -12,10 +12,9 @@ import utime
 
 def main():
   while True
-  
-  #initialises sensors and motors 
 
-  #receives data from the sensors 
+  #receives data from the sensors
+sensordata1()
 ultra()
   utime.sleep(2)
 ultra()
