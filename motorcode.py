@@ -18,7 +18,7 @@ mm_per_tick = math.pi * wheel_diameter_mm / ticks_per_revolution
 left_count = 0
 right_count = 0
 
-# Encoder Setup with Interrupts
+# Encoder Setup
 encoder_left_A = Pin(18, Pin.IN, Pin.PULL_UP)
 encoder_left_B = Pin(19, Pin.IN, Pin.PULL_UP)
 encoder_right_A = Pin(20, Pin.IN, Pin.PULL_UP)
@@ -27,7 +27,7 @@ encoder_right_B = Pin(21, Pin.IN, Pin.PULL_UP)
 # Encoder ISR (Interrupt Service Routine) for left encoder
 def update_left_encoder(pin):
     global left_count
-    # Update the encoder count in the ISR, but do minimal processing
+    # Update the encoder count in the ISR
     if encoder_left_B.value() == 0:
         left_count += 1  # Clockwise
     else:
@@ -36,7 +36,7 @@ def update_left_encoder(pin):
 # Encoder ISR (Interrupt Service Routine) for right encoder
 def update_right_encoder(pin):
     global right_count
-    # Update the encoder count in the ISR, but do minimal processing
+    # Update the encoder count in the ISR
     if encoder_right_B.value() == 0:
         right_count += 1  # Clockwise
     else:
@@ -80,7 +80,7 @@ class PID:
         self.prev_err = err
         return P + I + D
 
-# Initialize PID controllers for each motor
+# Initialize PID controllers for each motor and heading
 motor_pid_left = PID(1.0, 0.01, 0.1, 0)
 motor_pid_right = PID(1.0, 0.01, 0.1, 0)
 heading_pid = PID(1.0, 0.01, 0.1, 0)
