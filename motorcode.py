@@ -1,5 +1,5 @@
 import uasyncio as asyncio
-from machine import Pin, PWM, I2C
+from machine import Pin, PWM, SoftI2C
 import time
 import math
 
@@ -57,7 +57,7 @@ motor_right_backward = Pin(4, Pin.OUT)
 # Accelerometer I2C bus setup
 sda = Pin(16)
 scl = Pin(17)
-accel_i2c = I2C(0, scl=scl, sda=sda, freq=100000)
+accel_i2c = SoftI2C(scl=scl, sda=sda, freq=100000)
 
 # PID class definition
 class PID:
@@ -101,15 +101,15 @@ async def pid_drive(target_left_speed, target_right_speed):
         # Ensure dt is not zero
         if dt == 0:
             dt = 0.001  # minimum value to prevent division by zero error
-        
+        """
          # Calibrates heading to be within -180 to 180 degrees
         if heading_error > 180:
             heading_error -= 360
         elif heading_error < -180:
             heading_error += 360
-
+"""
         # Calculate heading correction
-        heading_correction = heading_pid.calculate(heading_error, dt)
+        #heading_correction = heading_pid.calculate(heading_error, dt)
 
         # Calculate current speeds from encoders
         current_left_speed = left_count
@@ -118,8 +118,8 @@ async def pid_drive(target_left_speed, target_right_speed):
         right_count = 0
 
         # Adjust PWM using heading correction
-        pwm_left = motor_pid_left.calculate(current_left_speed, dt) - heading_correction
-        pwm_right = motor_pid_right.calculate(current_right_speed, dt) + heading_correction
+        pwm_left = motor_pid_left.calculate(current_left_speed, dt) #- heading_correction
+        pwm_right = motor_pid_right.calculate(current_right_speed, dt) #+ heading_correction
 
         pwm_left = max(-65535, min(65535, int(pwm_left)))
         pwm_right = max(-65535, min(65535, int(pwm_right)))
@@ -204,4 +204,3 @@ except KeyboardInterrupt:
     motor_left_pwm.duty_u16(0)
     motor_right_pwm.duty_u16(0)
     print("Program terminated.")
-
