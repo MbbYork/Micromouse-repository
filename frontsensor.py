@@ -25,7 +25,8 @@ def ultra():
        #stop_event = new Event()
        #stop_event.is_set()
        LED.high()
-       
+      
+def sensordata2():    
 while True:
    ultra()
    utime.sleep(2)
