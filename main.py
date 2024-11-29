@@ -15,11 +15,7 @@ def main():
 
   #receives data from the sensors
 sensordata1()
-ultra()
-  utime.sleep(2)
-ultra()
-  utime.sleep(2)
-  
+sensordata2()
 
   #processes data using the pathfinding algorithm 
 
