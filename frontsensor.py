@@ -3,8 +3,8 @@ import utime
 import asyncio
 
 LED = Pin(1,Pin.OUT,Pin.PULL_UP)
-send = Pin(14, Pin.OUT) #was trigger
-receive = Pin(15, Pin.IN) # was echo
+send = Pin(14, Pin.OUT) 
+receive = Pin(15, Pin.IN) 
 def sensor():
    send.low()
    utime.sleep_us(2)
