@@ -19,7 +19,14 @@ timevalue = pwmdata(:,2);
 % code that plots values
 plot(timevalue, pwmvalue); 
 
+%smoothing filter
+pwm_smooth = smooth(timevalue, pwmvalue, 0.1, 'lowess'); 
+plot(timevalue, pwm_smooth,'-r'); 
+
 %labels for titles 
 title('PWM time graph')
-xlabel('PWM')
-ylabel('time')
+xlabel('Time(s)')
+ylabel('PWM OutpUt (%)')
+
+%improve visibility
+ylim[0,100]
