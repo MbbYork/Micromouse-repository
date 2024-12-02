@@ -18,8 +18,8 @@ i2c_0 = SoftI2C(sda=Pin(SDA_PIN_0), scl=Pin(SCL_PIN_0), freq=50000)
 i2c_1 = SoftI2C(sda=Pin(SDA_PIN_1), scl=Pin(SCL_PIN_1), freq=50000)
 
 # Initialize the two sensors with different I2C addresses
-sensor1 = Sensor(i2c_0, addr=I2C_ADDR1)
-sensor2 = Sensor(i2c_1, addr=I2C_ADDR2)
+sensor1 = Sensor(i2c_0)
+sensor2 = Sensor(i2c_1)
 
 # Main loop to read and print distance for both sensors
 def sensordata():
@@ -36,3 +36,4 @@ def sensordata():
 
 # Call the function to start reading data
 sensordata()
+
