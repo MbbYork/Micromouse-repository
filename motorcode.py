@@ -1,7 +1,8 @@
 import uasyncio as asyncio
-from machine import Pin, PWM, SoftI2C
+from machine import Pin, PWM, I2C
 import time
 import math
+from lsm303d import LSM303D
 
 # Global Variables
 current_direction = ""
@@ -55,9 +56,9 @@ motor_right_forward = Pin(3, Pin.OUT)
 motor_right_backward = Pin(4, Pin.OUT)
 
 # Accelerometer I2C bus setup
-sda = Pin(16)
-scl = Pin(17)
-accel_i2c = SoftI2C(scl=scl, sda=sda, freq=100000)
+sda = Pin(26)
+scl = Pin(27)
+#accel = LSM303D(sda_pin=sda,scl_pin=scl)
 
 # PID class definition
 class PID:
@@ -101,15 +102,18 @@ async def pid_drive(target_left_speed, target_right_speed):
         # Ensure dt is not zero
         if dt == 0:
             dt = 0.001  # minimum value to prevent division by zero error
-        """
+        
+        # Get accelerometer heading
+        #heading = accel.get_heading()
+        
          # Calibrates heading to be within -180 to 180 degrees
         if heading_error > 180:
             heading_error -= 360
         elif heading_error < -180:
             heading_error += 360
-"""
+        
         # Calculate heading correction
-        #heading_correction = heading_pid.calculate(heading_error, dt)
+        heading_correction = heading_pid.calculate(heading_error, dt)
 
         # Calculate current speeds from encoders
         current_left_speed = left_count
@@ -118,8 +122,8 @@ async def pid_drive(target_left_speed, target_right_speed):
         right_count = 0
 
         # Adjust PWM using heading correction
-        pwm_left = motor_pid_left.calculate(current_left_speed, dt) #- heading_correction
-        pwm_right = motor_pid_right.calculate(current_right_speed, dt) #+ heading_correction
+        pwm_left = motor_pid_left.calculate(current_left_speed, dt) - heading_correction
+        pwm_right = motor_pid_right.calculate(current_right_speed, dt) + heading_correction
 
         pwm_left = max(-65535, min(65535, int(pwm_left)))
         pwm_right = max(-65535, min(65535, int(pwm_right)))
@@ -151,6 +155,7 @@ async def pid_drive(target_left_speed, target_right_speed):
         
         await asyncio.sleep(0.05)  # Yield control to other tasks
 
+"""
 async def direction_listen():
     global current_direction, new_direction
     while running:
@@ -166,18 +171,9 @@ async def direction_listen():
             else:
                 print("Invalid direction input detected")
         await asyncio.sleep(0.05)
+"""
 
-async def manual_input():
-    global new_direction
-    user_input = input("Enter new direction (forward, backward, left, right, stop): ")
-    if user_input in ["forward", "backward", "left", "right", "stop"]:
-        new_direction = user_input
-    else:
-        print("Invalid direction. Try again.")
-    await asyncio.sleep(0.1)
-
-async def update_drive(pwm):
-    global current_direction
+"""async def update_drive(pwm):
     while running:
         if current_direction == "forward":
             await pid_drive(pwm, pwm)
@@ -192,10 +188,9 @@ async def update_drive(pwm):
 async def main():
     print("Boot successful")
     drive_task = asyncio.create_task(update_drive(motor_pwm))
-    listen_task = asyncio.create_task(direction_listen())
-    input_task = asyncio.create_task(manual_input())
+    #listen_task = asyncio.create_task(direction_listen())
     if running:
-        await asyncio.gather(drive_task, listen_task)
+        await asyncio.gather(drive_task)
 
 try:
     asyncio.run(main())
@@ -204,3 +199,4 @@ except KeyboardInterrupt:
     motor_left_pwm.duty_u16(0)
     motor_right_pwm.duty_u16(0)
     print("Program terminated.")
+"""
