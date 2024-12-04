@@ -3,6 +3,7 @@ from machine import Pin, PWM, I2C
 import time
 import math
 from lsm303d import LSM303D
+from VL6180 import Sensor
 
 # Global Variables
 current_direction = ""
@@ -88,7 +89,7 @@ heading_pid = PID(1.0, 0.01, 0.1, 0)
 
 async def pid_drive(target_left_speed, target_right_speed):
     global left_count, right_count, current_direction
-
+    
     motor_pid_left.setpoint = target_left_speed
     motor_pid_right.setpoint = target_right_speed
 
@@ -105,15 +106,15 @@ async def pid_drive(target_left_speed, target_right_speed):
         
         # Get accelerometer heading
         #heading = accel.get_heading()
-        
+        """
          # Calibrates heading to be within -180 to 180 degrees
         if heading_error > 180:
             heading_error -= 360
         elif heading_error < -180:
             heading_error += 360
-        
+        """
         # Calculate heading correction
-        heading_correction = heading_pid.calculate(heading_error, dt)
+        #heading_correction = heading_pid.calculate(heading_error, dt)
 
         # Calculate current speeds from encoders
         current_left_speed = left_count
@@ -122,8 +123,8 @@ async def pid_drive(target_left_speed, target_right_speed):
         right_count = 0
 
         # Adjust PWM using heading correction
-        pwm_left = motor_pid_left.calculate(current_left_speed, dt) - heading_correction
-        pwm_right = motor_pid_right.calculate(current_right_speed, dt) + heading_correction
+        pwm_left = motor_pid_left.calculate(current_left_speed, dt) #- heading_correction
+        pwm_right = motor_pid_right.calculate(current_right_speed, dt) #+ heading_correction
 
         pwm_left = max(-65535, min(65535, int(pwm_left)))
         pwm_right = max(-65535, min(65535, int(pwm_right)))
@@ -153,44 +154,66 @@ async def pid_drive(target_left_speed, target_right_speed):
         right_distance_mm = right_count * mm_per_tick
         print(f"Left Distance: {left_count:.2f} mm, Right Distance: {right_distance_mm:.2f} mm")
         
+        return running
         await asyncio.sleep(0.05)  # Yield control to other tasks
 
-"""
-async def direction_listen():
-    global current_direction, new_direction
-    while running:
-        if current_direction != new_direction:
-            if new_direction in ["forward", "backward", "left", "right"]:
-                current_direction = new_direction
-                print(f"Direction updated to: {current_direction}")
-            elif new_direction == "stop":
-                current_direction = "stop"
-                motor_left_pwm.duty_u16(0)
-                motor_right_pwm.duty_u16(0)
-                print("Motors stopped")
-            else:
-                print("Invalid direction input detected")
-        await asyncio.sleep(0.05)
-"""
+class Robot:
+    def __init__(self):
+        # Initialize robot state, motors, sensors, etc.
+        self.state = "forward"  # Initial state
+        self.motor_left_pwm = 30000
+        self.motor_right_pwm = 30000
+        #self.front_range = frontSensor.range
 
-"""async def update_drive(pwm):
-    while running:
-        if current_direction == "forward":
-            await pid_drive(pwm, pwm)
-        elif current_direction == "backward":
-            await pid_drive(-pwm, -pwm)
-        elif current_direction == "left":
-            await pid_drive(-pwm, pwm)
-        elif current_direction == "right":
-            await pid_drive(pwm, -pwm)
-        await asyncio.sleep(0.1)
+    async def run(self):
+        print("running robot")
+        while True:
+            distance = 100 #self.front_range()
+            self.update_direction(distance)
+            await self.move_robot()
+            await asyncio.sleep(0.1)  # Prevent busy-waiting
 
+    def update_direction(self, distance):
+        print("updating sensors")
+        # Implement logic to update robot state based on distance
+        threshold = 50  # Distance threshold for stopping (cm)
+        self.state = "stop" if distance < threshold else "forward"
+
+    async def move_robot(self):
+        print("moving robot")
+        # Implement state-based movement logic based on robot state
+        if self.state == "forward":
+            await pid_drive(self.motor_left_pwm,self.motor_right_pwm)
+            print("Moving forward")
+        elif self.state == "backward":
+            await pid_drive(-self.motor_left_pwm,-self.motor_right_pwm)
+            print("Moving backward")
+        elif self.state == "right":
+            await pid_drive(-self.motor_left_pwm,self.motor_right_pwm)
+            print("Moving right")
+        elif self.state == "left":
+            await pid_drive(self.motor_left_pwm,-self.motor_right_pwm)
+            print("Moving left")
+        elif self.state == "stop":
+            await pid_drive(0,0)
+            print("Stopping")
+    
+#---------Main Code------------
+#if __name__ == "__main__":
+#front_i2c = SoftI2C(sda=Pin(0),scl=Pin(1),freq=50000)
+#frontSensor = Sensor(front_i2c)
+async def main():
+    robot = Robot()
+    await robot.run()
+
+"""
 async def main():
     print("Boot successful")
     drive_task = asyncio.create_task(update_drive(motor_pwm))
     #listen_task = asyncio.create_task(direction_listen())
     if running:
         await asyncio.gather(drive_task)
+"""
 
 try:
     asyncio.run(main())
@@ -199,4 +222,3 @@ except KeyboardInterrupt:
     motor_left_pwm.duty_u16(0)
     motor_right_pwm.duty_u16(0)
     print("Program terminated.")
-"""
