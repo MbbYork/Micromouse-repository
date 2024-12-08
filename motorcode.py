@@ -1,5 +1,5 @@
 import uasyncio as asyncio
-from machine import Pin, PWM, I2C
+from machine import Pin, PWM, SoftI2C
 import time
 import math
 from lsm303d import LSM303D
@@ -49,12 +49,12 @@ encoder_left_A.irq(trigger=Pin.IRQ_RISING, handler=update_left_encoder)
 encoder_right_A.irq(trigger=Pin.IRQ_RISING, handler=update_right_encoder)
 
 # Motor Control Setup
-motor_left_pwm = PWM(Pin(0, Pin.OUT), freq=1000, duty_u16=0)
-motor_right_pwm = PWM(Pin(5, Pin.OUT), freq=1000, duty_u16=0)
-motor_left_forward = Pin(1, Pin.OUT)
-motor_left_backward = Pin(2, Pin.OUT)
-motor_right_forward = Pin(3, Pin.OUT)
-motor_right_backward = Pin(4, Pin.OUT)
+motor_left_pwm = PWM(Pin(6, Pin.OUT), freq=1000, duty_u16=0)
+motor_right_pwm = PWM(Pin(11, Pin.OUT), freq=1000, duty_u16=0)
+motor_left_forward = Pin(8, Pin.OUT)
+motor_left_backward = Pin(7, Pin.OUT)
+motor_right_forward = Pin(9, Pin.OUT)
+motor_right_backward = Pin(10, Pin.OUT)
 
 # Accelerometer I2C bus setup
 sda = Pin(26)
@@ -163,25 +163,23 @@ class Robot:
         self.state = "forward"  # Initial state
         self.motor_left_pwm = 30000
         self.motor_right_pwm = 30000
-        #self.front_range = frontSensor.range
+        self.front_range = frontSensor.range
 
     async def run(self):
         print("running robot")
         while True:
-            distance = 100 #self.front_range()
+            distance = self.front_range()
             self.update_direction(distance)
             await self.move_robot()
             await asyncio.sleep(0.1)  # Prevent busy-waiting
 
     def update_direction(self, distance):
         print("updating sensors")
-        # Implement logic to update robot state based on distance
-        threshold = 50  # Distance threshold for stopping (cm)
+        threshold = 50  # Distance threshold for stopping (mm)
         self.state = "stop" if distance < threshold else "forward"
 
     async def move_robot(self):
         print("moving robot")
-        # Implement state-based movement logic based on robot state
         if self.state == "forward":
             await pid_drive(self.motor_left_pwm,self.motor_right_pwm)
             print("Moving forward")
@@ -197,11 +195,13 @@ class Robot:
         elif self.state == "stop":
             await pid_drive(0,0)
             print("Stopping")
+            motor_right_forward.value(0)
+            motor_right_backward.value(0)
     
 #---------Main Code------------
 #if __name__ == "__main__":
-#front_i2c = SoftI2C(sda=Pin(0),scl=Pin(1),freq=50000)
-#frontSensor = Sensor(front_i2c)
+front_i2c = SoftI2C(sda=Pin(0),scl=Pin(1),freq=50000)
+frontSensor = Sensor(front_i2c)
 async def main():
     robot = Robot()
     await robot.run()
