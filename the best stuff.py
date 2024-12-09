@@ -73,7 +73,65 @@ def mazemappin(start, maze):
     Mapd = 0
     # Current position (starting position)
     i, j = start
+    
+    orientation == "d"
 
+    def turn_right():
+        right_turns = {"u" : "r", "r" : "d", "d" : "l", "l" : "u"}
+        orientation = right_turns[orientation]
+    def turn_left():
+        left_turns = {"u": "l", "l": "d", "d": "r", "r": "u"}    
+        orientation = left_turns[orientation]
+    def turn_away():
+        away_turns = {"u": "d", "d": "u", "r": "l", "l": "r"}
+        orientation = away_turns[orientation]
+    def get_sensors():
+        # Take sensor input
+        try:
+            frnt_snsr = int(input('front sensor (0 or 1):  '))
+            rght_snsr = int(input('right sensor (0 or 1):  '))
+            lft_snsr = int(input('left sensor (0 or 1):  '))
+            return frnt_snsr, rght_snsr, lft_snsr
+        except ValueError:
+            print('Invalid input. Defaulting to NO walls.')
+            frnt_snsr = rght_snsr = lft_snsr = 0
+            return 0, 0, 0
+    
+    def add_walls(i, j, orientation, north=False, east=False, south=False, west=False):
+
+        frnt_snsr, rght_snsr, lft_snsr = get_sensors()
+        
+        #determining the sensors according to the orientation. u : Up. d : down. r : right. l : left.
+        if orientation == "u":
+            # Convert to boolean values for walls
+            north = bool(frnt_snsr)
+            east = bool(rght_snsr)
+            west = bool(lft_snsr)
+            south = False
+            
+        elif orientation == "d":
+            north = False
+            east = bool(lft_snsr)
+            west = bool(rght_snsr)
+            south = bool(frnt_snsr)
+            
+        elif orientation == "r":
+            north = bool(lft_snsr)
+            east = bool(frnt_snsr)
+            west = False
+            south = bool(rght_snsr)
+            
+        elif orientation == "l":
+            north = bool(rght_snsr)
+            east = False
+            west = bool(frnt_snsr)
+            south = bool(lft_snsr)
+
+        else:
+            print("Invalid input. No walls set.")
+
+
+    
     # Loop to allow input from the user to update the maze
     while (Mapd == 0):
         
@@ -120,7 +178,7 @@ def mazemappin(start, maze):
         elif user_input == 'MPD':
             Mapd = 1
             print("mapping complete")        
-#maze = [
+#wallmaze = [
  #   ["#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#", "#"],
   #  ["#", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "#"],
    # ["#", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "#"],
