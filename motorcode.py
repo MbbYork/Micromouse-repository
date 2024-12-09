@@ -128,6 +128,15 @@ async def pid_drive(target_left_speed, target_right_speed):
 
         pwm_left = max(-65535, min(65535, int(pwm_left)))
         pwm_right = max(-65535, min(65535, int(pwm_right)))
+        
+        if pwm_left>0:
+             # Wall Following
+            wall_distance = 50 # Target distance
+            current_wall_distance = rightSensor.range()
+            wall_error = current_wall_distance - wall_distance
+            pwm_right_adjustment = wall_error * 100  # Proportional adjustment
+
+            pwm_right += pwm_right_adjustment
 
         motor_left_pwm.duty_u16(abs(pwm_left))
         motor_right_pwm.duty_u16(abs(pwm_right))
@@ -158,25 +167,29 @@ async def pid_drive(target_left_speed, target_right_speed):
         await asyncio.sleep(0.05)  # Yield control to other tasks
 
 class Robot:
-    def __init__(self):
+    def __init__(self, frontSensor, leftSensor, rightSensor):
         # Initialize robot state, motors, sensors, etc.
         self.state = "forward"  # Initial state
-        self.motor_left_pwm = 30000
-        self.motor_right_pwm = 30000
+        self.motor_left_pwm = 10000
+        self.motor_right_pwm = 10000
         self.front_range = frontSensor.range
+        self.left_range = leftSensor.range
+        self.right_range = rightSensor.range
 
     async def run(self):
         print("running robot")
-        while True:
-            distance = self.front_range()
-            self.update_direction(distance)
+        while running:
+            distance_front = self.front_range()
+            distance_left = self.left_range()
+            distance_right = self.right_range()
+            print(f"Distances - Front:{distance_front}, Left:{distance_left}, Right:{distance_right}")
+            self.update_direction(distance_front,distance_left,distance_right)
             await self.move_robot()
             await asyncio.sleep(0.1)  # Prevent busy-waiting
 
-    def update_direction(self, distance):
-        print("updating sensors")
+    def update_direction(self,front,left,right):
         threshold = 50  # Distance threshold for stopping (mm)
-        self.state = "stop" if distance < threshold else "forward"
+        self.state = "stop" if front < threshold else "forward"
 
     async def move_robot(self):
         print("moving robot")
@@ -194,31 +207,32 @@ class Robot:
             print("Moving left")
         elif self.state == "stop":
             await pid_drive(0,0)
-            print("Stopping")
             motor_right_forward.value(0)
             motor_right_backward.value(0)
-    
-#---------Main Code------------
-#if __name__ == "__main__":
-front_i2c = SoftI2C(sda=Pin(0),scl=Pin(1),freq=50000)
-frontSensor = Sensor(front_i2c)
-async def main():
-    robot = Robot()
-    await robot.run()
+            print("Stopping")
+        else:
+            await pid_drive(0,0)
+            motor_right_forward.value(0)
+            motor_right_backward.value(0)
+            print("Stopping due to invalid state")
 
-"""
+#---------Main Code------------
+# Sensor setup
+front_i2c = SoftI2C(sda=Pin(0), scl=Pin(1), freq=50000)
+left_i2c = SoftI2C(sda=Pin(2), scl=Pin(3), freq=50000)
+right_i2c = SoftI2C(sda=Pin(4), scl=Pin(5), freq=50000)
+frontSensor = Sensor(front_i2c)
+leftSensor = Sensor(left_i2c)
+rightSensor = Sensor(right_i2c)
+robot = Robot(frontSensor, leftSensor, rightSensor)
+
 async def main():
-    print("Boot successful")
-    drive_task = asyncio.create_task(update_drive(motor_pwm))
-    #listen_task = asyncio.create_task(direction_listen())
-    if running:
-        await asyncio.gather(drive_task)
-"""
+    await robot.run()
 
 try:
     asyncio.run(main())
 except KeyboardInterrupt:
-    running = False
-    motor_left_pwm.duty_u16(0)
-    motor_right_pwm.duty_u16(0)
+    robot.running = False
+    robot.motor_left_pwm.duty_u16(0)
+    robot.motor_right_pwm.duty_u16(0)
     print("Program terminated.")
