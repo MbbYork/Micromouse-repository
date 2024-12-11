@@ -51,13 +51,7 @@ def journy(start, end, maze): #define function shortest_path( starting value in 
         print("Instructions to complete the maze:")
         for instruction in instructions:
             print(instruction)
-            
-        for i in range(1, len(instructions)):
-            prev = instructions[i - 1]
-            curr = instructions[i]
-            if curr == prev:
-                print("forward")
-         
+                 
         for i in shortest_path:
             maze[i[0]][i[1]] = "X" # this goes through all coord values in the list and changes there value in the maze to an x to indicate that that is the path taken 
         print(shortest_path)
