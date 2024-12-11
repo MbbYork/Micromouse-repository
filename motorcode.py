@@ -21,14 +21,15 @@ left_count = 0
 right_count = 0
 
 # Encoder Setup
-encoder_left_A = Pin(18, Pin.IN, Pin.PULL_UP)
-encoder_left_B = Pin(19, Pin.IN, Pin.PULL_UP)
-encoder_right_A = Pin(20, Pin.IN, Pin.PULL_UP)
-encoder_right_B = Pin(21, Pin.IN, Pin.PULL_UP)
+encoder_left_A = Pin(12, Pin.IN, Pin.PULL_UP)
+encoder_left_B = Pin(13, Pin.IN, Pin.PULL_UP)
+encoder_right_A = Pin(14, Pin.IN, Pin.PULL_UP)
+encoder_right_B = Pin(15, Pin.IN, Pin.PULL_UP)
 
 # Encoder ISR (Interrupt Service Routine) for left encoder
 def update_left_encoder(pin):
     global left_count
+    print("Encoder L")
     # Update the encoder count in the ISR
     if encoder_left_B.value() == 0:
         left_count += 1  # Clockwise
@@ -38,6 +39,7 @@ def update_left_encoder(pin):
 # Encoder ISR (Interrupt Service Routine) for right encoder
 def update_right_encoder(pin):
     global right_count
+    print("Encoder R")
     # Update the encoder count in the ISR
     if encoder_right_B.value() == 0:
         right_count += 1  # Clockwise
@@ -49,12 +51,12 @@ encoder_left_A.irq(trigger=Pin.IRQ_RISING, handler=update_left_encoder)
 encoder_right_A.irq(trigger=Pin.IRQ_RISING, handler=update_right_encoder)
 
 # Motor Control Setup
-motor_left_pwm = PWM(Pin(6, Pin.OUT), freq=1000, duty_u16=0)
-motor_right_pwm = PWM(Pin(11, Pin.OUT), freq=1000, duty_u16=0)
-motor_left_forward = Pin(8, Pin.OUT)
-motor_left_backward = Pin(7, Pin.OUT)
-motor_right_forward = Pin(9, Pin.OUT)
-motor_right_backward = Pin(10, Pin.OUT)
+motor_left_pwm = PWM(Pin(11, Pin.OUT), freq=1000, duty_u16=0)
+motor_right_pwm = PWM(Pin(6, Pin.OUT), freq=1000, duty_u16=0)
+motor_left_forward = Pin(10, Pin.OUT)
+motor_left_backward = Pin(9, Pin.OUT)
+motor_right_forward = Pin(8, Pin.OUT)
+motor_right_backward = Pin(7, Pin.OUT)
 
 # Accelerometer I2C bus setup
 sda = Pin(26)
@@ -131,13 +133,19 @@ async def pid_drive(target_left_speed, target_right_speed):
         
         if pwm_left>0:
              # Wall Following
-            wall_distance = 50 # Target distance
+            wall_distance = 40 # Target distance
             current_wall_distance = rightSensor.range()
             wall_error = current_wall_distance - wall_distance
-            pwm_right_adjustment = wall_error * 100  # Proportional adjustment
-
-            pwm_right += pwm_right_adjustment
-
+            pwm_right_adjustment = wall_error * 110  # Proportional adjustment
+            pwm_right -= pwm_right_adjustment
+        """
+        if rightSensor.range()<100 and frontSensor.range()<50:
+            robot.state = "stop"
+            await asyncio.sleep(1)
+            robot.state = "left"
+            await asyncio.sleep(1)
+            robot.state = "stop"
+        """
         motor_left_pwm.duty_u16(abs(pwm_left))
         motor_right_pwm.duty_u16(abs(pwm_right))
         if pwm_left >= 0:
@@ -164,7 +172,7 @@ async def pid_drive(target_left_speed, target_right_speed):
         print(f"Left Distance: {left_count:.2f} mm, Right Distance: {right_distance_mm:.2f} mm")
         
         return running
-        await asyncio.sleep(0.05)  # Yield control to other tasks
+        await asyncio.sleep(0.01)  # Yield control to other tasks
 
 class Robot:
     def __init__(self, frontSensor, leftSensor, rightSensor):
@@ -185,7 +193,7 @@ class Robot:
             print(f"Distances - Front:{distance_front}, Left:{distance_left}, Right:{distance_right}")
             self.update_direction(distance_front,distance_left,distance_right)
             await self.move_robot()
-            await asyncio.sleep(0.1)  # Prevent busy-waiting
+            await asyncio.sleep(0.02)  # Prevent busy-waiting
 
     def update_direction(self,front,left,right):
         threshold = 50  # Distance threshold for stopping (mm)
@@ -209,6 +217,8 @@ class Robot:
             await pid_drive(0,0)
             motor_right_forward.value(0)
             motor_right_backward.value(0)
+            motor_left_forward.value(0)
+            motor_left_backward.value(0)
             print("Stopping")
         else:
             await pid_drive(0,0)
@@ -232,7 +242,10 @@ async def main():
 try:
     asyncio.run(main())
 except KeyboardInterrupt:
-    robot.running = False
-    robot.motor_left_pwm.duty_u16(0)
-    robot.motor_right_pwm.duty_u16(0)
+    motor_right_forward.value(0)
+    motor_right_backward.value(0)
+    motor_left_forward.value(0)
+    motor_left_backward.value(0)
+    robot.state = "stop"
+    pid_drive(0,0)
     print("Program terminated.")
