@@ -241,7 +241,7 @@ while True:
             move_forward()
            
     print("New Orientation is: " + orientation)
-    print("Current position:", (i, j)).
+    print("Current position:", (i, j))
     add_walls(i, j, orientation, wallmaze)
     print_maze()
     wallmaze[i][j] = "0"
