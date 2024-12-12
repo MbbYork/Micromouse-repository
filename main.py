@@ -2,243 +2,201 @@ import uasyncio as asyncio
 from machine import Pin, PWM, SoftI2C
 import time
 import math
-from lsm303d import LSM303D
 from VL53 import VL53L0X as Sensor
 
-# Global Variables
-running = True
+# Constants
+WHEEL_DIAMETER_MM = 40  # Wheel diameter in mm
+TICKS_PER_REVOLUTION = 300  # Encoder ticks per revolution
+MM_PER_TICK = math.pi * WHEEL_DIAMETER_MM / TICKS_PER_REVOLUTION
+BASE_PWM = 17000
+STOP_DISTANCE_THRESHOLD = 50  # Minimum safe distance to stop (mm)
+TURN_DURATION_90_DEGREES = 0.4 # Duration to complete a 90-degree turn (seconds)
 
-# Encoder & Wheel Details
-wheel_diameter_mm = 40  # Wheel diameter in mm
-ticks_per_revolution = 300  # Number of encoder ticks per revolution
-mm_per_tick = math.pi * wheel_diameter_mm / ticks_per_revolution
-
-# Odometry variables
+# Encoder variables
 left_count = 0
 right_count = 0
 
-# Encoder Setup
-encoder_left_A = Pin(12, Pin.IN, Pin.PULL_UP)
-encoder_left_B = Pin(13, Pin.IN, Pin.PULL_UP)
-encoder_right_A = Pin(14, Pin.IN, Pin.PULL_UP)
-encoder_right_B = Pin(15, Pin.IN, Pin.PULL_UP)
+# Motor control pins and setup
+motor_pins = {
+    "left_forward": Pin(10, Pin.OUT),
+    "left_backward": Pin(9, Pin.OUT),
+    "right_forward": Pin(7, Pin.OUT),
+    "right_backward": Pin(8, Pin.OUT),
+}
 
-# Encoder ISR (Interrupt Service Routine) for left encoder
-def update_left_encoder(pin):
-    global left_count
-    print("Encoder L")
-    # Update the encoder count in the ISR
-    if encoder_left_B.value() == 0:
-        left_count += 1  # Clockwise
+motor_pwm = {
+    "left": PWM(Pin(11, Pin.OUT), freq=50000, duty_u16=0),
+    "right": PWM(Pin(6, Pin.OUT), freq=50000, duty_u16=0),
+}
+
+# Encoder setup
+encoder_pins = {
+    "left_A": Pin(12, Pin.IN, Pin.PULL_UP),
+    "left_B": Pin(13, Pin.IN, Pin.PULL_UP),
+    "right_A": Pin(14, Pin.IN, Pin.PULL_UP),
+    "right_B": Pin(15, Pin.IN, Pin.PULL_UP),
+}
+
+def update_encoder(pin, count_var):
+    global left_count, right_count
+    count = left_count if count_var == "left" else right_count
+    if encoder_pins[f"{count_var}_B"].value() == 0:
+        count += 1  # Clockwise
     else:
-        left_count -= 1  # Counterclockwise
-
-# Encoder ISR (Interrupt Service Routine) for right encoder
-def update_right_encoder(pin):
-    global right_count
-    print("Encoder R")
-    # Update the encoder count in the ISR
-    if encoder_right_B.value() == 0:
-        right_count += 1  # Clockwise
+        count -= 1  # Counterclockwise
+    if count_var == "left":
+        left_count = count
     else:
-        right_count -= 1  # Counterclockwise
+        right_count = count
 
-# Attaches interrupts to the encoder A pins
-encoder_left_A.irq(trigger=Pin.IRQ_RISING, handler=update_left_encoder)
-encoder_right_A.irq(trigger=Pin.IRQ_RISING, handler=update_right_encoder)
+encoder_pins["left_A"].irq(trigger=Pin.IRQ_RISING, handler=lambda pin: update_encoder(pin, "left"))
+encoder_pins["right_A"].irq(trigger=Pin.IRQ_RISING, handler=lambda pin: update_encoder(pin, "right"))
 
-# Motor Control Setup
-motor_left_pwm = PWM(Pin(11, Pin.OUT), freq=50000, duty_u16=0)
-motor_right_pwm = PWM(Pin(6, Pin.OUT), freq=50000, duty_u16=0)
-motor_left_forward = Pin(10, Pin.OUT)
-motor_left_backward = Pin(9, Pin.OUT)
-motor_right_forward = Pin(7, Pin.OUT)
-motor_right_backward = Pin(8, Pin.OUT)
-
-# Accelerometer I2C bus setup
-sda = Pin(26)
-scl = Pin(27)
-#accel = LSM303D(sda_pin=sda,scl_pin=scl)
-
-# PID class definition
+# PID controller class
 class PID:
     def __init__(self, Kp, Ki, Kd, setpoint):
-        self.Kp = Kp  # Proportional
-        self.Ki = Ki  # Integral
-        self.Kd = Kd  # Derivative
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
         self.setpoint = setpoint
-        
         self.prev_err = 0
         self.integral = 0
-    
+
     def calculate(self, measured_value, dt):
         err = self.setpoint - measured_value
-        P = self.Kp * err
         self.integral += err * dt
-        I = self.Ki * self.integral
         derivative = (err - self.prev_err) / dt
-        D = self.Kd * derivative
         self.prev_err = err
-        return P + I + D
+        return self.Kp * err + self.Ki * self.integral + self.Kd * derivative
 
-# Initialize PID controllers for each motor and heading
-course_correction_pid = PID(0.8, 0.01, 0.25, 0)
-forward_pid = PID(2.0, 0.01, 0.01, 0)
-
-# PID setpoint and initial dt definitions
-forward_pid.setpoint = 50
-last_time = time.time()
-base_pwm = 17000
-
-async def pid_drive(target_left_speed, target_right_speed):
-    global left_count, right_count, current_direction, last_time, base_pwm
-
-    while running:
-        current_time = time.time()
-        dt = current_time - last_time
-        last_time = current_time
-        
-        # Ensure dt is not zero
-        if dt == 0:
-            dt = 0.01  # minimum value to prevent division by zero error
-        
-        # Get accelerometer heading
-        #heading = accel.get_heading()
-        """
-         # Calibrates heading to be within -180 to 180 degrees
-        if heading_error > 180:
-            heading_error -= 360
-        elif heading_error < -180:
-            heading_error += 360
-        """
-        # Calculate heading correction
-        #heading_correction = heading_pid.calculate(heading_error, dt)
-
-        # Calculate current speeds from encoders
-        current_left_speed = left_count
-        current_right_speed = right_count
-        left_count = 0 # Resets counters after reading
-        right_count = 0
-        
-        # Calculate course error using side sensors
-        front_distance = max(0, min(frontSensor.read(), 200))
-        left_distance = max(0, min(leftSensor.read(), 1000))
-        right_distance = max(0, min(rightSensor.read(), 1000))
-        course_error = left_distance - right_distance
-        front_adj = (front_distance/200)
-
-        # Adjust PWM using heading correction
-        pwm_course_correct = course_correction_pid.calculate(course_error, dt)*2
-        
-        pwm_course_correct = max(-5000, min(5000, int(pwm_course_correct)))
-
-        pwm_left = int(base_pwm*front_adj) + pwm_course_correct
-        pwm_right = int(base_pwm*front_adj) - pwm_course_correct
-        
-        if front_distance<50 and left_distance<50 and right_distance<50:
-            print("Dead end detected. Turning around")
-            robot.state = "stop"
-            await asyncio.sleep(1)
-            robot.state = "left"
-            await asyncio.sleep(1)
-            robot.state = "stop"
-        
-        if pwm_left > 0:
-            motor_left_forward.value(1)
-            motor_left_backward.value(0)
-        else:
-            motor_left_forward.value(0)
-            motor_left_backward.value(1)
-        if pwm_right > 0:
-            motor_right_forward.value(1)
-            motor_right_backward.value(0)
-        else:
-            motor_right_forward.value(0)
-            motor_right_backward.value(1)
-            
-        motor_left_pwm.duty_u16(abs(pwm_left))
-        motor_right_pwm.duty_u16(abs(pwm_right))
-        
-        # Debug for Motor Status and PWM values
-        print(f"Left PWM: {pwm_left}, Right PWM: {pwm_right}")
-        print(f"Left Motor Status: FWD: {motor_left_forward.value()}, BWD: {motor_left_backward.value()}")
-        print(f"Right Motor Status: FWD: {motor_right_forward.value()}, BWD: {motor_right_backward.value()}")
-        
-        # Distance Debugging
-        left_distance_mm = left_count * mm_per_tick
-        right_distance_mm = right_count * mm_per_tick
-        print(f"Left Distance: {left_count:.2f} mm, Right Distance: {right_distance_mm:.2f} mm")
-        
-        return running
-        await asyncio.sleep(0.01)  # Yield control to other tasks
-
+# Robot class
 class Robot:
-    def __init__(self, frontSensor, leftSensor, rightSensor):
-        # Initialize robot state, motors, sensors, etc.
-        self.state = "forward"  # Initial state
-        self.motor_left_pwm = 10000
-        self.motor_right_pwm = 10000
-        self.front_range = frontSensor.read
-        self.left_range = leftSensor.read
-        self.right_range = rightSensor.read
+    def __init__(self, front_sensor, left_sensor, right_sensor):
+        self.front_sensor = front_sensor
+        self.left_sensor = left_sensor
+        self.right_sensor = right_sensor
+        self.state = "stop"
+        self.pids = {
+            "course": PID(1.0, 0.01, 0.25, 0),
+            "forward": PID(2.0, 0.01, 0.01, 0),
+        }
 
-    async def run(self):
-        print("running robot")
-        while running:
-            distance_front = max(0, min(self.front_range(), 200))
-            distance_left = max(0, min(self.left_range(), 300))
-            distance_right = max(0, min(self.right_range(), 300))
-            print(f"Distances - Front:{distance_front}, Left:{distance_left}, Right:{distance_right}")
-            self.update_direction(distance_front,distance_left,distance_right)
-            await self.move_robot()
-            await asyncio.sleep(0.02)  # Prevent busy-waiting
+
+    async def drive(self):
+        global left_count, right_count
+        last_time,start_time = time.time()
+        while time.time() - start_time < 1 or self.state != "stop":
+            current_time = time.time()
+            dt = max(current_time - last_time, 0.01)
+            last_time = current_time
+
+            # Calculate encoder speeds
+            left_speed = left_count
+            right_speed = right_count
+            left_count = 0
+            right_count = 0
+
+            # Sensor readings
+            front_distance = self.front_sensor.read()
+            left_distance = self.left_sensor.read()
+            right_distance = self.right_sensor.read()
+
+            # Debug prints
+            print(f"Front Distance: {front_distance} mm, Left Distance: {left_distance} mm, Right Distance: {right_distance} mm")
+            print(f"Left Speed: {left_speed}, Right Speed: {right_speed}")
             
-    async def delay(func):
-        await asyncio.sleep(10)
-        self.state="stop"
+            # Speed adjustment based on proximity to obstacle
+            if front_distance < STOP_DISTANCE_THRESHOLD * 2:
+                # Scale PWM based on front_distance
+                speed_scale = max(0.1, front_distance / (STOP_DISTANCE_THRESHOLD * 2))
+                adjusted_pwm = int(BASE_PWM * speed_scale)
+                print(f"Adjusting speed. Scale: {speed_scale:.2f}, PWM: {adjusted_pwm}")
+            else:
+                adjusted_pwm = BASE_PWM
 
-    def update_direction(self,front,left,right):
-        threshold = 50  # Distance threshold for stopping (mm)
-        #self.state = "stop" if front < threshold else "forward"
+            # Dead-end handling
+            if front_distance < STOP_DISTANCE_THRESHOLD and left_distance < STOP_DISTANCE_THRESHOLD and right_distance < STOP_DISTANCE_THRESHOLD:
+                print("Dead end detected. Turning around.")
+                await self.turn_around()
+                continue
 
-    async def move_robot(self):
-        if self.state == "forward":
-            await pid_drive(self.motor_left_pwm,self.motor_right_pwm)
-            print("Moving forward")
-        elif self.state == "backward":
-            await pid_drive(-self.motor_left_pwm,-self.motor_right_pwm)
-            print("Moving backward")
-        elif self.state == "right":
-            await pid_drive(-self.motor_left_pwm,self.motor_right_pwm)
-            print("Moving right")
-        elif self.state == "left":
-            await pid_drive(self.motor_left_pwm,-self.motor_right_pwm)
-            print("Moving left")
-        elif self.state == "stop":
-            await pid_drive(0,0)
-            print("Stopping")
-            pass
+            # Calculate course correction
+            course_error = left_distance - right_distance
+            pwm_course_correct = self.pids["course"].calculate(course_error, dt)
+            pwm_course_correct = max(-5000, min(5000, int(pwm_course_correct)))
 
-#---------Main Code------------
-# Sensor setup
-front_i2c = SoftI2C(sda=Pin(0), scl=Pin(1), freq=50000)
-left_i2c = SoftI2C(sda=Pin(2), scl=Pin(3), freq=50000)
-right_i2c = SoftI2C(sda=Pin(4), scl=Pin(5), freq=50000)
-frontSensor = Sensor(front_i2c)
-leftSensor = Sensor(left_i2c)
-rightSensor = Sensor(right_i2c)
-robot = Robot(frontSensor, leftSensor, rightSensor)
+            # Adjust motor speeds
+            pwm_left = adjusted_pwm + pwm_course_correct
+            pwm_right = adjusted_pwm - pwm_course_correct
 
+            self.set_motor_pwm(pwm_left, pwm_right)
+
+            # Debug prints for PWM
+            print(f"PWM Left: {pwm_left}, PWM Right: {pwm_right}")
+
+            await asyncio.sleep(0.01)
+
+    async def turn_around(self):
+        print("Turning around.")
+        self.set_motor_pwm(-BASE_PWM, BASE_PWM)  # Simple left turn
+        await asyncio.sleep(0.8)  # Adjust duration for a 180-degree turn
+        self.state = "forward"
+
+    async def turn_left_90(self):
+        print("Turning left 90 degrees")
+        self.set_motor_pwm(-BASE_PWM, BASE_PWM)
+        await asyncio.sleep(TURN_DURATION_90_DEGREES)
+        self.set_motor_pwm(0, 0)
+
+    async def turn_right_90(self):
+        print("Turning right 90 degrees")
+        self.set_motor_pwm(BASE_PWM, -BASE_PWM)
+        await asyncio.sleep(TURN_DURATION_90_DEGREES)
+        self.set_motor_pwm(0, 0)
+
+    def set_motor_pwm(self, left_pwm, right_pwm):
+        # Update motor direction and PWM
+        motor_pins["left_forward"].value(left_pwm > 0)
+        motor_pins["left_backward"].value(left_pwm < 0)
+        motor_pins["right_forward"].value(right_pwm > 0)
+        motor_pins["right_backward"].value(right_pwm < 0)
+
+        motor_pwm["left"].duty_u16(abs(left_pwm))
+        motor_pwm["right"].duty_u16(abs(right_pwm))
+
+        # Debug prints for motor status
+        print(f"Left Motor: Forward={motor_pins['left_forward'].value()}, Backward={motor_pins['left_backward'].value()}")
+        print(f"Right Motor: Forward={motor_pins['right_forward'].value()}, Backward={motor_pins['right_backward'].value()}")
+        
+        
+    def drive_instructions(instructions):
+        for instruction in instructions:
+            if instruction == "forward":
+                forward()
+            elif instruction == "turn_left":
+                turn_left()
+            elif instruction == "turn_right":
+                turn_right()
+            else:
+                print(f"Unknown instruction: {instruction}")
+
+# Main function
 async def main():
-    await robot.run()
+    front_sensor = Sensor(SoftI2C(sda=Pin(0), scl=Pin(1), freq=100000))
+    left_sensor = Sensor(SoftI2C(sda=Pin(2), scl=Pin(3), freq=100000))
+    right_sensor = Sensor(SoftI2C(sda=Pin(4), scl=Pin(5), freq=100000))
 
+    robot = Robot(front_sensor, left_sensor, right_sensor)
+    robot.state = "forward"
+    try:
+        await robot.drive_instructions()
+    except KeyboardInterrupt:
+        robot.state = "stop"
+        robot.set_motor_pwm(0, 0)
+        print("Program terminated.")
+
+# Run the program
 try:
     asyncio.run(main())
-except KeyboardInterrupt:
-    motor_right_forward.value(0)
-    motor_right_backward.value(0)
-    motor_left_forward.value(0)
-    motor_left_backward.value(0)
-    robot.state = "stop"
-    pid_drive(0,0)
-    print("Program terminated.")
+except Exception as e:
+    print(f"Error: {e}")
