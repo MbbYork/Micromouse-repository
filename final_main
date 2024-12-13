@@ -68,14 +68,17 @@ def journy(start, end, maze):    paths = []
         
 def turn_right():
     global orientation
+    robot.turn_right()
     right_turns = {"u" : "r", "r" : "d", "d" : "l", "l" : "u"}
     orientation = right_turns[orientation]
 def turn_left():
     global orientation
+    robot.turn_left()
     left_turns = {"u": "l", "l": "d", "d": "r", "r": "u"}    
     orientation = left_turns[orientation]
 def turn_away():
     global orientation
+    robot.turn_around()
     away_turns = {"u": "d", "d": "u", "r": "l", "l": "r"}
     orientation = away_turns[orientation]
 def move_forward():
@@ -89,8 +92,7 @@ def move_forward():
     new_i, new_j = moves[orientation]
     if wallmaze[new_i][new_j] == " ":
         i, j = new_i, new_j
-    else:
-        print("Cannot move forward; a wall is blocking the way.")
+    robot.forward()
     
 def get_sensors():
     # Take sensor input
