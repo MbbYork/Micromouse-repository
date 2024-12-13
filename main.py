@@ -3,15 +3,14 @@ from machine import Pin, PWM, SoftI2C
 import time
 import math
 from VL53 import VL53L0X as Sensor
-from collections import deque
 
 # Constants
 WHEEL_DIAMETER_MM = 40  # Wheel diameter in mm
 TICKS_PER_REVOLUTION = 300  # Encoder ticks per revolution
 MM_PER_TICK = math.pi * WHEEL_DIAMETER_MM / TICKS_PER_REVOLUTION
-BASE_PWM = 17000
-STOP_DISTANCE_THRESHOLD = 60  # Minimum safe distance to stop (mm)
-TURN_DURATION_90_DEGREES = 0.5  # Duration to complete a 90-degree turn (seconds)
+BASE_PWM = 19000
+STOP_DISTANCE_THRESHOLD = 50  # Minimum safe distance to stop (mm)
+TURN_DURATION_90_DEGREES = 0.3 # Duration to complete a 90-degree turn (seconds)
 
 # Encoder variables
 left_count = 0
@@ -38,10 +37,20 @@ encoder_pins = {
     "right_B": Pin(15, Pin.IN, Pin.PULL_UP),
 }
 
-# Constants
-STOP_DISTANCE_THRESHOLD = 50  # Minimum safe distance to stop (mm)
-TURN_DURATION_90_DEGREES = 0.4 # Duration to complete a 90-degree turn (seconds)
-BASE_PWM = 5000  # Base PWM value for motor speed
+def update_encoder(pin, count_var):
+    global left_count, right_count
+    count = left_count if count_var == "left" else right_count
+    if encoder_pins[f"{count_var}_B"].value() == 0:
+        count += 1  # Clockwise
+    else:
+        count -= 1  # Counterclockwise
+    if count_var == "left":
+        left_count = count
+    else:
+        right_count = count
+
+encoder_pins["left_A"].irq(trigger=Pin.IRQ_RISING, handler=lambda pin: update_encoder(pin, "left"))
+encoder_pins["right_A"].irq(trigger=Pin.IRQ_RISING, handler=lambda pin: update_encoder(pin, "right"))
 
 # PID controller class
 class PID:
@@ -62,58 +71,56 @@ class PID:
 
 # Robot class
 class Robot:
-    def __init__(self, front_sensor, left_sensor, right_sensor, start=(0, 0)):
+    def __init__(self, front_sensor, left_sensor, right_sensor):
         self.front_sensor = front_sensor
         self.left_sensor = left_sensor
         self.right_sensor = right_sensor
-        self.start = start
         self.state = "stop"
-        self.map = {}  # To store the grid map
         self.pids = {
             "course": PID(1.0, 0.01, 0.25, 0),
             "forward": PID(2.0, 0.01, 0.01, 0),
         }
 
-    async def scan_environment(self):
-        # Scan and create a map of the environment
-        while True:
-            front_distance = self.front_sensor.get_distance()
-            left_distance = self.left_sensor.get_distance()
-            right_distance = self.right_sensor.get_distance()
-
-            self.map[(0, 0)] = {
-                "front": front_distance,
-                "left": left_distance,
-                "right": right_distance
-            }
-
-            await asyncio.sleep(0.1)  # Scan every 100ms
-
     async def forward(self):
-        last_time, start_time = time.time(), time.time()
-        while time.time() - start_time < 1 or self.state != "stop":
+        global left_count, right_count
+        last_time = time.time()
+        start_time = time.time()
+        while time.time() - start_time < 1 and self.state != "stop":
             current_time = time.time()
             dt = max(current_time - last_time, 0.01)
             last_time = current_time
 
+            # Calculate encoder speeds
+            left_speed = left_count
+            right_speed = right_count
+            left_count = 0
+            right_count = 0
+
+            # Sensor readings
+            front_distance = self.front_sensor.read()
+            left_distance = self.left_sensor.read()
+            right_distance = self.right_sensor.read()
+
+            # Debug prints
+            print(f"Front Distance: {front_distance} mm, Left Distance: {left_distance} mm, Right Distance: {right_distance} mm")
+            print(f"Left Speed: {left_speed}, Right Speed: {right_speed}")
+
             # Speed adjustment based on proximity to obstacle
-            front_distance = self.map[(0, 0)]["front"]
-            if front_distance < STOP_DISTANCE_THRESHOLD * 2:
-                speed_scale = max(0.1, front_distance / (STOP_DISTANCE_THRESHOLD * 2))
+            if front_distance < STOP_DISTANCE_THRESHOLD * 3:
+                # Scale PWM based on front_distance
+                speed_scale = max(0.1, front_distance / (STOP_DISTANCE_THRESHOLD * 3))
                 adjusted_pwm = int(BASE_PWM * speed_scale)
                 print(f"Adjusting speed. Scale: {speed_scale:.2f}, PWM: {adjusted_pwm}")
             else:
                 adjusted_pwm = BASE_PWM
 
             # Dead-end handling
-            if front_distance < STOP_DISTANCE_THRESHOLD and self.map[(0, -1)]["front"] < STOP_DISTANCE_THRESHOLD and self.map[(-1, 0)]["front"] < STOP_DISTANCE_THRESHOLD:
+            if front_distance < STOP_DISTANCE_THRESHOLD and left_distance < STOP_DISTANCE_THRESHOLD and right_distance < STOP_DISTANCE_THRESHOLD:
                 print("Dead end detected. Turning around.")
                 await self.turn_around()
                 continue
 
             # Calculate course correction
-            left_distance = self.map[(0, -1)]["left"]
-            right_distance = self.map[(0, 1)]["right"]
             course_error = left_distance - right_distance
             pwm_course_correct = self.pids["course"].calculate(course_error, dt)
             pwm_course_correct = max(-5000, min(5000, int(pwm_course_correct)))
@@ -124,7 +131,16 @@ class Robot:
 
             self.set_motor_pwm(pwm_left, pwm_right)
 
+            # Debug prints for PWM
+            print(f"PWM Left: {pwm_left}, PWM Right: {pwm_right}")
+
             await asyncio.sleep(0.01)
+
+    async def turn_around(self):
+        print("Turning around.")
+        self.set_motor_pwm(-BASE_PWM, BASE_PWM)  # Simple left turn
+        await asyncio.sleep(0.6)  # Adjust duration for a 180-degree turn
+        self.state = "forward"
 
     async def turn_left(self):
         print("Turning left 90 degrees")
@@ -137,7 +153,7 @@ class Robot:
         self.set_motor_pwm(BASE_PWM, -BASE_PWM)
         await asyncio.sleep(TURN_DURATION_90_DEGREES)
         self.set_motor_pwm(0, 0)
-        
+
     def set_motor_pwm(self, left_pwm, right_pwm):
         # Update motor direction and PWM
         motor_pins["left_forward"].value(left_pwm > 0)
@@ -162,50 +178,9 @@ class Robot:
                 await self.turn_right()
             else:
                 print(f"Unknown instruction: {instruction}")
+            
 
-    async def find_path(self, start, goal):
-        # BFS algorithm for pathfinding
-        queue = deque([start],(13*13))
-        visited = set()
-        parent = {start: None}
-
-        while queue:
-            current = queue.popleft()
-
-            if current == goal:
-                path = []
-                while current:
-                    path.append(current)
-                    current = parent[current]
-                return path[::-1]  # Return reversed path
-
-            x, y = current
-            visited.add(current)
-
-            # Possible moves: forward, left, right
-            moves = [(0, -1), (-1, 0), (0, 1)]  # Correspond to (left, down, right)
-            for move in moves:
-                new_pos = (x + move[0], y + move[1])
-                if new_pos not in visited and self.map.get(new_pos) and self.map[new_pos]["front"] > STOP_DISTANCE_THRESHOLD:
-                    queue.append(new_pos)
-                    parent[new_pos] = current
-            print(queue[0])
-
-    async def navigate_to_goal(self, goal):
-        path = await self.find_path(self.start, goal)
-        
-        if path != None:
-            print(path)
-            for step in path:
-                if step == (0, -1):
-                    await self.turn_left()
-                elif step == (-1, 0):
-                    await self.forward()
-                elif step == (0, 1):
-                    await self.turn_right()
-                else:
-                    print("Unknown step in path.")
-
+# Main function
 async def main():
     front_sensor = Sensor(SoftI2C(sda=Pin(0), scl=Pin(1), freq=100000))
     left_sensor = Sensor(SoftI2C(sda=Pin(2), scl=Pin(3), freq=100000))
@@ -213,23 +188,16 @@ async def main():
 
     robot = Robot(front_sensor, left_sensor, right_sensor)
     robot.state = "forward"
-
-    # Start scanning environment in parallel
-    asyncio.create_task(robot.scan_environment())
-
+    instructions = ["forward","forward","forward","forward","forward","forward","forward","forward","forward","forward"]
     try:
-        # Navigate through the maze (example path instructions)
-        await robot.navigate_to_goal(goal=(2, 2))
+        await robot.drive_instructions(instructions)
     except KeyboardInterrupt:
         robot.state = "stop"
-        self.set_motor_pwm(0, 0)
+        robot.set_motor_pwm(0, 0)
         print("Program terminated.")
 
 # Run the program
-asyncio.run(main())
-"""
 try:
     asyncio.run(main())
 except Exception as e:
     print(f"Error: {e}")
-"""
