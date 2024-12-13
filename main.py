@@ -5,10 +5,16 @@ import math
 from VL53 import VL53L0X as Sensor
 
 # Constants
+WHEEL_DIAMETER_MM = 40  # Wheel diameter in mm
+TICKS_PER_REVOLUTION = 300  # Encoder ticks per revolution
 MM_PER_TICK = math.pi * WHEEL_DIAMETER_MM / TICKS_PER_REVOLUTION
 BASE_PWM = 19000
 STOP_DISTANCE_THRESHOLD = 50  # Minimum safe distance to stop (mm)
 TURN_DURATION_90_DEGREES = 0.3 # Duration to complete a 90-degree turn (seconds)
+
+# Encoder variables
+left_count = 0
+right_count = 0
 
 # Motor control pins and setup
 motor_pins = {
@@ -22,6 +28,29 @@ motor_pwm = {
     "left": PWM(Pin(11, Pin.OUT), freq=50000, duty_u16=0),
     "right": PWM(Pin(6, Pin.OUT), freq=50000, duty_u16=0),
 }
+
+# Encoder setup
+encoder_pins = {
+    "left_A": Pin(12, Pin.IN, Pin.PULL_UP),
+    "left_B": Pin(13, Pin.IN, Pin.PULL_UP),
+    "right_A": Pin(14, Pin.IN, Pin.PULL_UP),
+    "right_B": Pin(15, Pin.IN, Pin.PULL_UP),
+}
+
+def update_encoder(pin, count_var):
+    global left_count, right_count
+    count = left_count if count_var == "left" else right_count
+    if encoder_pins[f"{count_var}_B"].value() == 0:
+        count += 1  # Clockwise
+    else:
+        count -= 1  # Counterclockwise
+    if count_var == "left":
+        left_count = count
+    else:
+        right_count = count
+
+encoder_pins["left_A"].irq(trigger=Pin.IRQ_RISING, handler=lambda pin: update_encoder(pin, "left"))
+encoder_pins["right_A"].irq(trigger=Pin.IRQ_RISING, handler=lambda pin: update_encoder(pin, "right"))
 
 # PID controller class
 class PID:
@@ -61,6 +90,11 @@ class Robot:
             dt = max(current_time - last_time, 0.01)
             last_time = current_time
 
+            # Calculate encoder speeds
+            left_speed = left_count
+            right_speed = right_count
+            left_count = 0
+            right_count = 0
 
             # Sensor readings
             front_distance = self.front_sensor.read()
@@ -79,6 +113,12 @@ class Robot:
                 print(f"Adjusting speed. Scale: {speed_scale:.2f}, PWM: {adjusted_pwm}")
             else:
                 adjusted_pwm = BASE_PWM
+
+            # Dead-end handling
+            if front_distance < STOP_DISTANCE_THRESHOLD and left_distance < STOP_DISTANCE_THRESHOLD and right_distance < STOP_DISTANCE_THRESHOLD:
+                print("Dead end detected. Turning around.")
+                await self.turn_around()
+                continue
 
             # Calculate course correction
             course_error = left_distance - right_distance
@@ -127,7 +167,18 @@ class Robot:
         # Debug prints for motor status
         print(f"Left Motor: Forward={motor_pins['left_forward'].value()}, Backward={motor_pins['left_backward'].value()}")
         print(f"Right Motor: Forward={motor_pins['right_forward'].value()}, Backward={motor_pins['right_backward'].value()}")
-        
+
+    async def drive_instructions(self, instructions):
+        for instruction in instructions:
+            if instruction == "forward":
+                await self.forward()
+            elif instruction == "turn_left":
+                await self.turn_left()
+            elif instruction == "turn_right":
+                await self.turn_right()
+            else:
+                print(f"Unknown instruction: {instruction}")
+            await asyncio.sleep(0.5)
 
 # Main function
 async def main():
